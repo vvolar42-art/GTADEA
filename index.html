@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador 3D de Ciudades Grandes y Aeropuertos</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            overflow: hidden;
+            background-color: #0b0e14;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: #e2e8f0;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(15, 23, 42, 0.88);
+            backdrop-filter: blur(12px);
+            padding: 22px;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            width: 320px;
+            z-index: 10;
+        }
+        h2 {
+            font-size: 1.1rem;
+            color: #38bdf8;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .control-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            margin-bottom: 6px;
+            color: #94a3b8;
+        }
+        span.val {
+            color: #38bdf8;
+            font-weight: 600;
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: #38bdf8;
+            cursor: pointer;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
+            border: none;
+            border-radius: 8px;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(56, 189, 248, 0.45);
+        }
+        #info-badge {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(15, 23, 42, 0.8);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: #94a3b8;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+
+    <!-- Three.js & OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="ui-panel">
+        <h2><span>🏙️</span> Configuración de Mapa</h2>
+        
+        <div class="control-group">
+            <label>Número de Ciudades: <span class="val" id="cities-val">2</span></label>
+            <input type="range" id="cities-slider" min="1" max="4" value="2">
+        </div>
+
+        <div class="control-group">
+            <label>Separación entre Edificios: <span class="val" id="spacing-val">Amplia</span></label>
+            <input type="range" id="spacing-slider" min="80" max="180" value="120">
+        </div>
+
+        <div class="control-group">
+            <label>Altura Máxima Torres: <span class="val" id="height-val">500m</span></label>
+            <input type="range" id="height-slider" min="200" max="800" value="500">
+        </div>
+
+        <button id="btn-generate">Regenerar Mundo 3D</button>
+    </div>
+
+    <div id="info-badge">Usa el ratón para rotar, desplazarte y hacer zoom</div>
+    <div id="canvas-container"></div>
+
+    <script>
+        // --- CONFIGURACIÓN DE ESCENA Y RENDERER ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0e17);
+        scene.fog = new THREE.FogExp2(0x0a0e17, 0.00018);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 10, 10000);
+        camera.position.set(1200, 1000, 1800);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.02; // No bajar del suelo
+        controls.maxDistance = 5000;
+
+        // --- ILUMINACIÓN AJUSTADA PARA VOLUMEN Y SOMBRAS LIMPIAS ---
+        const ambientLight = new THREE.AmbientLight(0xddeeff, 0.55); // Luz ambiental suficiente para evitar sombras negras planas
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xfff5ea, 1.3);
+        sunLight.position.set(1500, 2200, 1000);
+        sunLight.castShadow = true;
+
+        // Ajustes de cámara de sombra ampliados para cubrir edificios x10 gigantes
+        sunLight.shadow.camera.near = 200;
+        sunLight.shadow.camera.far = 6000;
+        const shadowDim = 2500;
+        sunLight.shadow.camera.left = -shadowDim;
+        sunLight.shadow.camera.right = shadowDim;
+        sunLight.shadow.camera.top = shadowDim;
+        sunLight.shadow.camera.bottom = -shadowDim;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.bias = -0.0005;
+        scene.add(sunLight);
+
+        // Luz de relleno lateral
+        const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.35);
+        fillLight.position.set(-1000, 800, -1000);
+        scene.add(fillLight);
+
+        // --- MATERIALES REUTILIZABLES ---
+        const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.9, metalness: 0.1 });
+        const runwayMaterial = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+        const stripeMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+        const glassMaterial = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.2, metalness: 0.8 });
+        const concreteMaterial = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.7, metalness: 0.2 });
+        const metalMaterial = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.3, metalness: 0.8 });
+
+        let worldGroup = new THREE.Group();
+        scene.add(worldGroup);
+
+        // --- CREACIÓN DEL SUELO PRINCIPAL ---
+        const worldSize = 6000;
+        const groundGeo = new THREE.PlaneGeometry(worldSize, worldSize);
+        const ground = new THREE.Mesh(groundGeo, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Rejilla decorativa de terreno
+        const gridHelper = new THREE.GridHelper(worldSize, 60, 0x1e293b, 0x0f172a);
+        gridHelper.position.y = 1;
+        scene.add(gridHelper);
+
+        // --- GENERADOR DE EDIFICIOS GIGANTES (X10) ---
+        function createMegaBuilding(x, z, maxH, spacing) {
+            const buildingGroup = new THREE.Group();
+
+            // Dimensiones x10 más grandes
+            const width = 35 + Math.random() * 45;   // 35m a 80m de ancho
+            const depth = 35 + Math.random() * 45;   // 35m a 80m de fondo
+            const height = 120 + Math.random() * (maxH - 120); // Alturas masivas de hasta 800m
+
+            // Geometría principal con origen exacto en la base (evita fallos de sombra o renderizado plano)
+            const boxGeo = new THREE.BoxGeometry(width, height, depth);
+            
+            // Variaciones de material
+            const matType = Math.random();
+            let mat = concreteMaterial;
+            if (matType > 0.6) mat = glassMaterial;
+            else if (matType > 0.3) mat = metalMaterial;
+
+            const mainMesh = new THREE.Mesh(boxGeo, mat);
+            mainMesh.position.y = height / 2; // Asegura que se eleva perfectamente desde el suelo
+            mainMesh.castShadow = true;
+            mainMesh.receiveShadow = true;
+            buildingGroup.add(mainMesh);
+
+            // Detalle superior / Estructura de azotea (Antena, Helipuerto o cubo superior)
+            if (Math.random() > 0.3) {
+                const topType = Math.random();
+                if (topType > 0.5) {
+                    // Cubo escalonado superior
+                    const topH = height * 0.15;
+                    const topGeo = new THREE.BoxGeometry(width * 0.6, topH, depth * 0.6);
+                    const topMesh = new THREE.Mesh(topGeo, glassMaterial);
+                    topMesh.position.y = height + topH / 2;
+                    topMesh.castShadow = true;
+                    topMesh.receiveShadow = true;
+                    buildingGroup.add(topMesh);
+                } else {
+                    // Aguja / Antena gigante
+                    const antennaH = 40 + Math.random() * 60;
+                    const antennaGeo = new THREE.CylinderGeometry(1, 4, antennaH, 8);
+                    const antennaMesh = new THREE.Mesh(antennaGeo, metalMaterial);
+                    antennaMesh.position.y = height + antennaH / 2;
+                    antennaMesh.castShadow = true;
+                    buildingGroup.add(antennaMesh);
+                }
+            }
+
+            buildingGroup.position.set(x, 0, z);
+            return buildingGroup;
+        }
+
+        // --- GENERADOR DE AEROPUERTO COMPLETO ---
+        function createAirport(centerX, centerZ, angle) {
+            const airportGroup = new THREE.Group();
+
+            // 1. Pista de Aterrizaje Gigante
+            const runwayW = 120;
+            const runwayL = 1200;
+            const runwayGeo = new THREE.BoxGeometry(runwayW, 2, runwayL);
+            const runway = new THREE.Mesh(runwayGeo, runwayMaterial);
+            runway.position.y = 1;
+            runway.receiveShadow = true;
+            airportGroup.add(runway);
+
+            // Líneas de pista
+            for (let i = -runwayL / 2 + 80; i < runwayL / 2 - 80; i += 100) {
+                const stripeGeo = new THREE.BoxGeometry(6, 3, 40);
+                const stripe = new THREE.Mesh(stripeGeo, stripeMaterial);
+                stripe.position.set(0, 2, i);
+                airportGroup.add(stripe);
+            }
+
+            // 2. Torre de Control
+            const towerGroup = new THREE.Group();
+            const baseH = 120;
+            const towerBaseGeo = new THREE.CylinderGeometry(12, 18, baseH, 16);
+            const towerBase = new THREE.Mesh(towerBaseGeo, concreteMaterial);
+            towerBase.position.y = baseH / 2;
+            towerBase.castShadow = true;
+            towerBase.receiveShadow = true;
+            towerGroup.add(towerBase);
+
+            // Cabina superior de la torre
+            const cabinGeo = new THREE.CylinderGeometry(26, 18, 24, 16);
+            const cabin = new THREE.Mesh(cabinGeo, glassMaterial);
+            cabin.position.y = baseH + 12;
+            cabin.castShadow = true;
+            towerGroup.add(cabin);
+
+            towerGroup.position.set(runwayW + 100, 0, 0);
+            airportGroup.add(towerGroup);
+
+            // 3. Edificio Terminal
+            const termW = 220;
+            const termH = 35;
+            const termD = 100;
+            const termGeo = new THREE.BoxGeometry(termW, termH, termD);
+            const terminal = new THREE.Mesh(termGeo, glassMaterial);
+            terminal.position.set(runwayW + 140, termH / 2, -200);
+            terminal.castShadow = true;
+            terminal.receiveShadow = true;
+            airportGroup.add(terminal);
+
+            // 4. Aviones estacionados (Bocetos low-poly escala adecuada)
+            for (let p = -1; p <= 1; p++) {
+                const plane = createLowPolyPlane();
+                plane.position.set(runwayW + 80, 2, -200 + p * 120);
+                plane.rotation.y = Math.PI / 2;
+                airportGroup.add(plane);
+            }
+
+            airportGroup.position.set(centerX, 0, centerZ);
+            airportGroup.rotation.y = angle;
+            return airportGroup;
+        }
+
+        // Modelo simplificado de avión
+        function createLowPolyPlane() {
+            const plane = new THREE.Group();
+            // Fuselaje
+            const bodyGeo = new THREE.CylinderGeometry(4, 4, 50, 8);
+            const body = new THREE.Mesh(bodyGeo, metalMaterial);
+            body.rotation.z = Math.PI / 2;
+            body.position.y = 6;
+            body.castShadow = true;
+            plane.add(body);
+
+            // Alas
+            const wingGeo = new THREE.BoxGeometry(12, 1, 45);
+            const wing = new THREE.Mesh(wingGeo, metalMaterial);
+            wing.position.set(0, 6, 0);
+            wing.castShadow = true;
+            plane.add(wing);
+
+            return plane;
+        }
+
+        // --- LÓGICA DE GENERACIÓN DEL MUNDO ---
+        function generateWorld() {
+            // Limpiar mundo anterior
+            while (worldGroup.children.length > 0) {
+                const obj = worldGroup.children[0];
+                worldGroup.remove(obj);
+            }
+
+            const numCities = parseInt(document.getElementById('cities-slider').value);
+            const spacing = parseInt(document.getElementById('spacing-slider').value); // Distancia entre edificios
+            const maxHeight = parseInt(document.getElementById('height-slider').value);
+
+            // Centros de ciudades muy distantes entre sí
+            const cityCenters = [
+                { x: -1200, z: -800 },
+                { x: 1200, z: 900 },
+                { x: -900, z: 1200 },
+                { x: 1100, z: -1000 }
+            ].slice(0, numCities);
+
+            cityCenters.forEach((center, idx) => {
+                const cityGroup = new THREE.Group();
+
+                // Generar red reducida de edificios gigantes con amplia separación
+                const gridSize = 4; // Matriz de 4x4 torres por ciudad (pocas pero gigantes)
+                
+                for (let i = -gridSize / 2; i < gridSize / 2; i++) {
+                    for (let j = -gridSize / 2; j < gridSize / 2; j++) {
+                        // Dejar huecos aleatorios para plazas o avenidas anchas
+                        if (Math.random() < 0.25) continue;
+
+                        const posX = i * (spacing + 40) + (Math.random() * 20 - 10);
+                        const posZ = j * (spacing + 40) + (Math.random() * 20 - 10);
+
+                        const building = createMegaBuilding(posX, posZ, maxHeight, spacing);
+                        cityGroup.add(building);
+                    }
+                }
+
+                cityGroup.position.set(center.x, 0, center.z);
+                worldGroup.add(cityGroup);
+
+                // Cada ciudad tiene un aeropuerto adyacente bien posicionado
+                const airportAngle = Math.atan2(-center.z, -center.x) + (Math.PI / 4);
+                const airportX = center.x + Math.cos(airportAngle) * 750;
+                const airportZ = center.z + Math.sin(airportAngle) * 750;
+
+                const airport = createAirport(airportX, airportZ, airportAngle);
+                worldGroup.add(airport);
+            });
+        }
+
+        // --- EVENTOS Y CONTROLES UI ---
+        document.getElementById('cities-slider').addEventListener('input', (e) => {
+            document.getElementById('cities-val').innerText = e.target.value;
+        });
+
+        document.getElementById('spacing-slider').addEventListener('input', (e) => {
+            const val = e.target.value;
+            let text = "Media";
+            if (val > 140) text = "Muy Amplia";
+            else if (val > 100) text = "Amplia";
+            document.getElementById('spacing-val').innerText = text;
+        });
+
+        document.getElementById('height-slider').addEventListener('input', (e) => {
+            document.getElementById('height-val').innerText = e.target.value + "m";
+        });
+
+        document.getElementById('btn-generate').addEventListener('click', () => {
+            generateWorld();
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- BUCLE DE ANIMACIÓN ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Inicializar
+        generateWorld();
+        animate();
+    </script>
+</body>
+</html>
