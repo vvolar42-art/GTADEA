@@ -1,0 +1,21 @@
+{
+  "short_name": "Simulador",
+  "name": "Simulador de Vuelo y Conducción 3D",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#6eb7ff",
+  "theme_color": "#6eb7ff",
+  "display": "standalone",
+  "orientation": "landscape"
+}
